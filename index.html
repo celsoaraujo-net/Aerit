@@ -506,25 +506,29 @@
 
     async function initAudio() {
         if (audioInitialized) return;
-        await Tone.start();
-        
-        // Engine hum
-        synthEngine = new Tone.FMSynth({
-            harmonicity: 1.5,
-            modulationIndex: 2,
-            oscillator: { type: "sawtooth" },
-            modulation: { type: "square" },
-            envelope: { attack: 0.1, decay: 0.1, sustain: 1, release: 1 }
-        }).toDestination();
-        synthEngine.volume.value = -20;
-        synthEngine.triggerAttack("C2");
+        try {
+            await Tone.start();
+            
+            // Engine hum
+            synthEngine = new Tone.FMSynth({
+                harmonicity: 1.5,
+                modulationIndex: 2,
+                oscillator: { type: "sawtooth" },
+                modulation: { type: "square" },
+                envelope: { attack: 0.1, decay: 0.1, sustain: 1, release: 1 }
+            }).toDestination();
+            synthEngine.volume.value = -20;
+            synthEngine.triggerAttack("C2");
 
-        // Wind noise
-        noiseWind = new Tone.Noise("brown").toDestination();
-        noiseWind.volume.value = -Infinity; // Start muted
-        noiseWind.start();
+            // Wind noise
+            noiseWind = new Tone.Noise("brown").toDestination();
+            noiseWind.volume.value = -Infinity; // Start muted
+            noiseWind.start();
 
-        audioInitialized = true;
+            audioInitialized = true;
+        } catch (e) {
+            console.warn("Audio initialization bypassed or failed due to browser policies:", e);
+        }
     }
 
     function updateAudio() {
@@ -837,28 +841,34 @@
     }
 
     // --- Initialization & Setup ---
-    document.getElementById('start-btn').addEventListener('click', async () => {
-        document.getElementById('start-screen').style.display = 'none';
-        
-        // Init state
-        state.position.set(0, 800, 0);
-        state.velocity.set(0, 0, -150); // Start with forward speed
-        state.throttle = 0.5;
-        throttleKnob.style.bottom = '50%';
-        
-        // Set initial orientation
-        state.quaternion.setFromAxisAngle(new THREE.Vector3(0,1,0), Math.PI); // facing -Z
-        aircraft.quaternion.copy(state.quaternion);
+    document.getElementById('start-btn').addEventListener('click', () => {
+        try {
+            document.getElementById('start-screen').style.display = 'none';
+            
+            // Init state
+            state.position.set(0, 800, 0);
+            state.velocity.set(0, 0, -150); // Start with forward speed
+            state.throttle = 0.5;
+            throttleKnob.style.bottom = '50%';
+            
+            // Set initial orientation
+            state.quaternion.setFromAxisAngle(new THREE.Vector3(0,1,0), Math.PI); // facing -Z
+            aircraft.quaternion.copy(state.quaternion);
 
-        // Generate initial terrain to avoid pop-in
-        updateTerrain();
-        
-        // Start engine
-        await initAudio();
-        
-        state.isPlaying = true;
-        state.lastTime = performance.now();
-        animate();
+            // Generate initial terrain to avoid pop-in
+            updateTerrain();
+            
+            state.isPlaying = true;
+            state.lastTime = performance.now();
+            
+            // Start main game loop immediately
+            animate();
+
+            // Start engine asynchronously (don't block the game loop if audio hangs)
+            initAudio();
+        } catch (error) {
+            console.error("Critical error during initialization:", error);
+        }
     });
 
     // Handle Resize
