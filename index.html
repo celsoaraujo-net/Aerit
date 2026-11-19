@@ -844,21 +844,14 @@
     // --- Initialization & Setup ---
     let hasStarted = false;
 
-    const startFlight = async (e) => {
-        if (e) e.preventDefault();
+    const startFlight = (e) => {
+        if (e && typeof e.preventDefault === 'function' && e.cancelable) {
+            e.preventDefault();
+        }
         if (hasStarted) return;
         hasStarted = true;
 
-        // iOS Safari PWA critical: Unblock Audio exactly here on the user gesture.
-        try {
-            if (typeof Tone !== 'undefined' && !audioInitialized) {
-                await Tone.start();
-                initAudio();
-            }
-        } catch (err) {
-            console.warn("Audio init failed, proceeding silently:", err);
-        }
-
+        // 1. Instantly start the game (Synchronous to guarantee execution)
         try {
             document.getElementById('start-screen').style.display = 'none';
             
@@ -881,7 +874,20 @@
             // Start main game loop immediately
             animate();
         } catch (error) {
-            console.error("Critical error during initialization:", error);
+            console.error("Critical error during UI/Game initialization:", error);
+        }
+
+        // 2. Attempt Audio (Fire-and-forget, will not block game if it hangs)
+        try {
+            if (typeof Tone !== 'undefined' && !audioInitialized) {
+                Tone.start().then(() => {
+                    initAudio();
+                }).catch(err => {
+                    console.warn("Audio init rejected:", err);
+                });
+            }
+        } catch (err) {
+            console.warn("Audio init failed, proceeding silently:", err);
         }
     };
 
