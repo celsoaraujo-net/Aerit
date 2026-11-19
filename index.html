@@ -2,8 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AeroSim Pro | Next-Gen Flight</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Aerit">
+    <title>Aerit | Next-Gen Flight</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
@@ -134,7 +137,7 @@
 
     <!-- Start Screen -->
     <div id="start-screen">
-        <h1 class="text-5xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-br from-blue-400 to-emerald-400 mb-4 tracking-tighter">AEROSIM PRO</h1>
+        <h1 class="text-5xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-br from-blue-400 to-emerald-400 mb-4 tracking-tighter">AERIT</h1>
         <p class="text-slate-400 mb-8 max-w-md text-center">Procedural rendering, realistic flight physics, and dynamic sound synthesis. Designed for high-end devices.</p>
         
         <div class="grid grid-cols-2 gap-4 text-sm text-slate-300 mb-8 max-w-sm w-full bg-slate-800/50 p-4 rounded-xl border border-slate-700">
@@ -209,7 +212,7 @@
 
 <script>
     /**
-     * AeroSim Pro - Core Engine
+     * Aerit - Core Engine
      * Handles Three.js rendering, Procedural Terrain, Flight Physics, and Tone.js Audio.
      */
 
@@ -504,11 +507,9 @@
     let synthEngine, noiseWind;
     let audioInitialized = false;
 
-    async function initAudio() {
+    function initAudio() {
         if (audioInitialized) return;
         try {
-            await Tone.start();
-            
             // Engine hum
             synthEngine = new Tone.FMSynth({
                 harmonicity: 1.5,
@@ -527,7 +528,7 @@
 
             audioInitialized = true;
         } catch (e) {
-            console.warn("Audio initialization bypassed or failed due to browser policies:", e);
+            console.warn("Audio initialization bypassed or failed:", e);
         }
     }
 
@@ -841,7 +842,23 @@
     }
 
     // --- Initialization & Setup ---
-    document.getElementById('start-btn').addEventListener('click', () => {
+    let hasStarted = false;
+
+    const startFlight = async (e) => {
+        if (e) e.preventDefault();
+        if (hasStarted) return;
+        hasStarted = true;
+
+        // iOS Safari PWA critical: Unblock Audio exactly here on the user gesture.
+        try {
+            if (typeof Tone !== 'undefined' && !audioInitialized) {
+                await Tone.start();
+                initAudio();
+            }
+        } catch (err) {
+            console.warn("Audio init failed, proceeding silently:", err);
+        }
+
         try {
             document.getElementById('start-screen').style.display = 'none';
             
@@ -863,13 +880,14 @@
             
             // Start main game loop immediately
             animate();
-
-            // Start engine asynchronously (don't block the game loop if audio hangs)
-            initAudio();
         } catch (error) {
             console.error("Critical error during initialization:", error);
         }
-    });
+    };
+
+    const startBtn = document.getElementById('start-btn');
+    startBtn.addEventListener('click', startFlight);
+    startBtn.addEventListener('touchstart', startFlight, { passive: false });
 
     // Handle Resize
     window.addEventListener('resize', () => {
