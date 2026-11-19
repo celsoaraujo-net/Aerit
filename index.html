@@ -7,6 +7,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Aerit">
     <title>Aerit | Next-Gen Flight</title>
+    <script>
+        // Initialize early error tracking before any libraries load
+        window.earlyLogs = [];
+        window.onerror = function(msg, url, line) {
+            window.earlyLogs.push(`CRASH: ${msg} (Line ${line})`);
+            const dbg = document.getElementById('debug-log');
+            if (dbg) dbg.innerText = window.earlyLogs.join('\n');
+        };
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
@@ -216,6 +225,10 @@
      * Aerit - Core Engine
      * Handles Three.js rendering, Procedural Terrain, Flight Physics, and Tone.js Audio.
      */
+    try {
+        if (typeof THREE === 'undefined') {
+            throw new Error("3D Engine (Three.js) failed to load. Check network or content blockers.");
+        }
 
     // --- State & Config ---
     const CONFIG = {
@@ -253,7 +266,7 @@
 
     // --- Three.js Setup ---
     const canvas = document.getElementById('game-canvas');
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); // Removed powerPreference which can crash iOS background contexts
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Cap pixel ratio for performance
     
@@ -361,12 +374,12 @@
     aircraft.add(tail);
 
     // Cockpit Canopy
-    const canopyGeo = new THREE.CapsuleGeometry(0.8, 3, 4, 16);
-    canopyGeo.rotateX(Math.PI / 2);
+    const canopyGeo = new THREE.SphereGeometry(1, 16, 16); // Replaced CapsuleGeometry with SphereGeometry for r128 compatibility
     const canopyMat = new THREE.MeshPhysicalMaterial({
         color: 0x000000, metalness: 1.0, roughness: 0.0, transmission: 0.9, thickness: 0.5
     });
     const canopy = new THREE.Mesh(canopyGeo, canopyMat);
+    canopy.scale.set(0.8, 0.8, 2.5); // Stretch the sphere to look like a sleek canopy
     canopy.position.set(0, 1.2, -4);
     aircraft.add(canopy);
 
@@ -840,12 +853,6 @@
     // --- Initialization & Setup ---
     let hasStarted = false;
 
-    // Global error catcher to display crashes on the home screen
-    window.onerror = function(msg, url, line) {
-        const dbg = document.getElementById('debug-log');
-        if(dbg) dbg.innerText = "Crash Error: " + msg + " (Line: " + line + ")";
-    };
-
     const startFlight = (e) => {
         if (e && typeof e.preventDefault === 'function' && e.cancelable) {
             e.preventDefault();
@@ -897,7 +904,8 @@
     };
 
     const startBtn = document.getElementById('start-btn');
-    startBtn.onclick = startFlight;
+    startBtn.addEventListener('click', startFlight);
+    startBtn.addEventListener('touchstart', startFlight, { passive: false });
 
     // Handle Resize
     window.addEventListener('resize', () => {
@@ -909,6 +917,18 @@
     // Initial render to draw the background before start
     renderer.render(scene, camera);
 
+    // Print early errors if any occurred before this block finished
+    if (window.earlyLogs && window.earlyLogs.length > 0) {
+        document.getElementById('debug-log').innerText = window.earlyLogs.join('\n');
+    }
+
+    } catch (criticalError) {
+        const dbg = document.getElementById('debug-log');
+        if (dbg) {
+            dbg.innerText = `FATAL ERROR: ${criticalError.message}`;
+            dbg.style.display = 'block';
+        }
+    }
 </script>
 </body>
 </html>
