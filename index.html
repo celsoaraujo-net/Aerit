@@ -152,6 +152,7 @@
         <button id="start-btn" class="px-10 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold rounded-full text-xl transition-all shadow-[0_0_30px_rgba(16,185,129,0.4)] transform hover:scale-105 active:scale-95">
             INITIALIZE FLIGHT
         </button>
+        <div id="debug-log" class="mt-6 text-red-400 text-xs font-mono max-w-sm text-center"></div>
     </div>
 
     <!-- UI Overlay -->
@@ -300,18 +301,6 @@
     dirLight.shadow.bias = -0.0005;
     scene.add(dirLight);
 
-    // --- Environment Map for Reflections ---
-    // Generate a procedural environment map to make the plane look realistic
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    pmremGenerator.compileEquirectangularShader();
-    
-    // Simple gradient sky for reflection
-    const envScene = new THREE.Scene();
-    envScene.background = new THREE.Color(0x87CEEB);
-    const envCamera = new THREE.CubeCamera(1, 1000, new THREE.WebGLCubeRenderTarget(128));
-    envCamera.update(renderer, envScene);
-    scene.environment = envCamera.renderTarget.texture;
-
     // --- Procedural Aircraft (Sleek Jet) ---
     const aircraft = new THREE.Group();
     scene.add(aircraft);
@@ -394,7 +383,14 @@
     aircraft.add(engineLight);
 
     // --- Procedural Terrain Generation ---
-    const simplex = new SimplexNoise();
+    let simplex;
+    try {
+        simplex = new SimplexNoise();
+    } catch (e) {
+        // Fallback if CDN is blocked by iOS strict tracking/adblocker
+        simplex = { noise2D: (x, y) => Math.sin(x) * Math.cos(y) };
+        document.getElementById('debug-log').innerText = "Warning: Noise lib missing, using fallback.";
+    }
     
     // We create a pool of terrain chunks to tile endlessly
     const chunks = new Map();
@@ -844,22 +840,29 @@
     // --- Initialization & Setup ---
     let hasStarted = false;
 
+    // Global error catcher to display crashes on the home screen
+    window.onerror = function(msg, url, line) {
+        const dbg = document.getElementById('debug-log');
+        if(dbg) dbg.innerText = "Crash Error: " + msg + " (Line: " + line + ")";
+    };
+
     const startFlight = (e) => {
         if (e && typeof e.preventDefault === 'function' && e.cancelable) {
             e.preventDefault();
         }
         if (hasStarted) return;
-        hasStarted = true;
-
-        // 1. Instantly start the game (Synchronous to guarantee execution)
+        
         try {
+            hasStarted = true;
+
+            // 1. Instantly start the game (Synchronous to guarantee execution)
             document.getElementById('start-screen').style.display = 'none';
             
             // Init state
             state.position.set(0, 800, 0);
             state.velocity.set(0, 0, -150); // Start with forward speed
             state.throttle = 0.5;
-            throttleKnob.style.bottom = '50%';
+            document.getElementById('throttle-knob').style.bottom = '50%';
             
             // Set initial orientation
             state.quaternion.setFromAxisAngle(new THREE.Vector3(0,1,0), Math.PI); // facing -Z
@@ -874,7 +877,9 @@
             // Start main game loop immediately
             animate();
         } catch (error) {
-            console.error("Critical error during UI/Game initialization:", error);
+            document.getElementById('start-screen').style.display = 'flex';
+            document.getElementById('debug-log').innerText = "Crash during init: " + error.message;
+            hasStarted = false;
         }
 
         // 2. Attempt Audio (Fire-and-forget, will not block game if it hangs)
@@ -892,8 +897,7 @@
     };
 
     const startBtn = document.getElementById('start-btn');
-    startBtn.addEventListener('click', startFlight);
-    startBtn.addEventListener('touchstart', startFlight, { passive: false });
+    startBtn.onclick = startFlight;
 
     // Handle Resize
     window.addEventListener('resize', () => {
