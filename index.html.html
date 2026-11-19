@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AeroSim Pro | Next-Gen Flight</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Inter', sans-serif;
+            touch-action: none; /* Prevent browser gestures */
+        }
+        #game-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none; /* Let clicks pass through except for controls */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Mobile Touch Controls */
+        #touch-controls {
+            display: none;
+            width: 100%;
+            height: 40%;
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            pointer-events: auto;
+        }
+        @media (max-width: 1024px) {
+            #touch-controls {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-end;
+                padding: 20px;
+            }
+        }
+
+        /* Joystick */
+        .joystick-zone {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            position: relative;
+        }
+        .joystick-knob {
+            width: 60px;
+            height: 60px;
+            background: radial-gradient(circle, rgba(255,255,255,0.8) 0%, rgba(200,200,200,0.4) 100%);
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            transition: transform 0.1s ease-out;
+        }
+
+        /* Throttle Slider */
+        .throttle-zone {
+            width: 60px;
+            height: 200px;
+            border-radius: 30px;
+            position: relative;
+            display: flex;
+            justify-content: center;
+        }
+        .throttle-knob {
+            width: 70px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 20px;
+            position: absolute;
+            bottom: 0;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            transition: bottom 0.1s ease-out;
+        }
+
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            color: white;
+        }
+
+        .hud-line { stroke: rgba(0, 255, 100, 0.8); stroke-width: 2; fill: none; }
+        .hud-text { fill: rgba(0, 255, 100, 0.8); font-family: monospace; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <!-- WebGL Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Start Screen -->
+    <div id="start-screen">
+        <h1 class="text-5xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-br from-blue-400 to-emerald-400 mb-4 tracking-tighter">AEROSIM PRO</h1>
+        <p class="text-slate-400 mb-8 max-w-md text-center">Procedural rendering, realistic flight physics, and dynamic sound synthesis. Designed for high-end devices.</p>
+        
+        <div class="grid grid-cols-2 gap-4 text-sm text-slate-300 mb-8 max-w-sm w-full bg-slate-800/50 p-4 rounded-xl border border-slate-700">
+            <div class="font-bold text-right pr-2 border-r border-slate-600">Controls:</div>
+            <div>WASD / Touch Joystick</div>
+            <div class="font-bold text-right pr-2 border-r border-slate-600">Throttle:</div>
+            <div>Up/Down Arrows / Slider</div>
+            <div class="font-bold text-right pr-2 border-r border-slate-600">Look:</div>
+            <div>Mouse Drag</div>
+        </div>
+
+        <button id="start-btn" class="px-10 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold rounded-full text-xl transition-all shadow-[0_0_30px_rgba(16,185,129,0.4)] transform hover:scale-105 active:scale-95">
+            INITIALIZE FLIGHT
+        </button>
+    </div>
+
+    <!-- UI Overlay -->
+    <div id="ui-layer">
+        
+        <!-- Top HUD -->
+        <div class="w-full flex justify-between p-6 items-start">
+            <!-- Speed / Alt -->
+            <div class="glass-panel p-4 rounded-2xl flex flex-col gap-2 min-w-[150px]">
+                <div class="text-xs text-slate-400 font-bold tracking-widest uppercase">Airspeed</div>
+                <div class="text-3xl font-black text-white" id="ui-speed">0 <span class="text-sm text-slate-400 font-normal">KTS</span></div>
+                <div class="h-px w-full bg-slate-700 my-1"></div>
+                <div class="text-xs text-slate-400 font-bold tracking-widest uppercase">Altitude</div>
+                <div class="text-3xl font-black text-white" id="ui-alt">0 <span class="text-sm text-slate-400 font-normal">FT</span></div>
+            </div>
+
+            <!-- Environment Info -->
+            <div class="glass-panel p-3 rounded-xl flex gap-4 text-xs font-mono text-emerald-400">
+                <div id="ui-fps">60 FPS</div>
+                <div id="ui-engine">ENG: IDLE</div>
+            </div>
+        </div>
+
+        <!-- Center Crosshair / Horizon -->
+        <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none w-64 h-64">
+            <svg viewBox="0 0 200 200" width="100%" height="100%">
+                <!-- Static Crosshair -->
+                <circle cx="100" cy="100" r="2" fill="rgba(0, 255, 100, 0.8)"/>
+                <path d="M 80 100 L 95 100 M 105 100 L 120 100 M 100 80 L 100 95 M 100 105 L 100 120" class="hud-line" />
+                
+                <!-- Dynamic Pitch Ladder (Controlled via JS) -->
+                <g id="pitch-ladder" transform="translate(0,0) rotate(0, 100, 100)">
+                    <path d="M 60 100 L 140 100" class="hud-line" style="stroke-width: 1.5; stroke-dasharray: 5,5;" />
+                </g>
+            </svg>
+        </div>
+
+        <!-- Mobile Touch Controls -->
+        <div id="touch-controls">
+            <!-- Throttle Slider (Left on mobile, but visually separated) -->
+            <div class="glass-panel throttle-zone ml-4 mb-4" id="throttle-zone">
+                <div class="w-1 h-full bg-slate-600 rounded-full mx-auto my-4 opacity-50 relative">
+                    <!-- Ticks -->
+                    <div class="absolute w-4 h-px bg-white left-1/2 transform -translate-x-1/2 top-[10%]"></div>
+                    <div class="absolute w-4 h-px bg-white left-1/2 transform -translate-x-1/2 top-[50%]"></div>
+                    <div class="absolute w-4 h-px bg-white left-1/2 transform -translate-x-1/2 top-[90%]"></div>
+                </div>
+                <div class="throttle-knob flex items-center justify-center text-xs font-bold text-slate-800" id="throttle-knob">THR</div>
+            </div>
+
+            <!-- Virtual Joystick (Right on mobile) -->
+            <div class="glass-panel joystick-zone mr-4 mb-4" id="joystick-zone">
+                <div class="absolute inset-2 border-2 border-slate-600/30 rounded-full"></div>
+                <div class="joystick-knob" id="joystick-knob"></div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    /**
+     * AeroSim Pro - Core Engine
+     * Handles Three.js rendering, Procedural Terrain, Flight Physics, and Tone.js Audio.
+     */
+
+    // --- State & Config ---
+    const CONFIG = {
+        chunkSize: 2000,
+        chunkResolution: 64,
+        maxSpeed: 300,
+        acceleration: 50,
+        gravity: 9.8,
+        liftFactor: 0.045,
+        dragFactor: 0.0005,
+        turnRate: 1.5,
+        pitchRate: 1.2
+    };
+
+    const state = {
+        isPlaying: false,
+        throttle: 0, // 0 to 1
+        speed: 0,
+        altitude: 500,
+        pitch: 0, // radians
+        roll: 0,  // radians
+        yaw: 0,
+        position: new THREE.Vector3(0, 500, 0),
+        velocity: new THREE.Vector3(0, 0, 0),
+        quaternion: new THREE.Quaternion(),
+        
+        // Input
+        input: { pitch: 0, roll: 0 },
+        keys: { w: false, a: false, s: false, d: false, up: false, down: false },
+        
+        lastTime: performance.now(),
+        frameCount: 0,
+        fpsTime: performance.now()
+    };
+
+    // --- Three.js Setup ---
+    const canvas = document.getElementById('game-canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Cap pixel ratio for performance
+    
+    // High-End Graphics Settings
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    const scene = new THREE.Scene();
+    
+    // Atmospheric Fog
+    const skyColor = new THREE.Color(0xd0e8ff);
+    const horizonColor = new THREE.Color(0xffd7a0); // Sunset vibe
+    scene.background = skyColor;
+    scene.fog = new THREE.FogExp2(0xd0e8ff, 0.00025);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 20000);
+    const cameraGroup = new THREE.Group();
+    scene.add(cameraGroup);
+    cameraGroup.add(camera);
+    
+    // Chase camera setup
+    camera.position.set(0, 10, 40);
+    let cameraTargetOffset = new THREE.Vector3(0, 5, -20);
+    let lookAtTarget = new THREE.Vector3();
+
+    // --- Lighting ---
+    const ambientLight = new THREE.HemisphereLight(skyColor, 0x444455, 0.6);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfff0dd, 2.5);
+    dirLight.position.set(1000, 1500, -1000);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.camera.near = 100;
+    dirLight.shadow.camera.far = 4000;
+    const d = 1500;
+    dirLight.shadow.camera.left = -d;
+    dirLight.shadow.camera.right = d;
+    dirLight.shadow.camera.top = d;
+    dirLight.shadow.camera.bottom = -d;
+    dirLight.shadow.bias = -0.0005;
+    scene.add(dirLight);
+
+    // --- Environment Map for Reflections ---
+    // Generate a procedural environment map to make the plane look realistic
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+    
+    // Simple gradient sky for reflection
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color(0x87CEEB);
+    const envCamera = new THREE.CubeCamera(1, 1000, new THREE.WebGLCubeRenderTarget(128));
+    envCamera.update(renderer, envScene);
+    scene.environment = envCamera.renderTarget.texture;
+
+    // --- Procedural Aircraft (Sleek Jet) ---
+    const aircraft = new THREE.Group();
+    scene.add(aircraft);
+
+    // Advanced Material
+    const jetMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0x1a202c,
+        metalness: 0.9,
+        roughness: 0.2,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1,
+        envMapIntensity: 2.0
+    });
+
+    // Fuselage
+    const fuselageGeo = new THREE.CylinderGeometry(1, 2, 20, 16);
+    fuselageGeo.rotateX(Math.PI / 2);
+    const fuselage = new THREE.Mesh(fuselageGeo, jetMaterial);
+    fuselage.castShadow = true;
+    fuselage.receiveShadow = true;
+    aircraft.add(fuselage);
+
+    // Nose
+    const noseGeo = new THREE.ConeGeometry(1, 6, 16);
+    noseGeo.rotateX(Math.PI / 2);
+    noseGeo.translate(0, 0, -13);
+    const nose = new THREE.Mesh(noseGeo, jetMaterial);
+    nose.castShadow = true;
+    aircraft.add(nose);
+
+    // Wings
+    const wingGeo = new THREE.BoxGeometry(16, 0.5, 6);
+    // Sweep wings back
+    const positionAttribute = wingGeo.attributes.position;
+    for ( let i = 0; i < positionAttribute.count; i ++ ) {
+        const x = positionAttribute.getX(i);
+        const z = positionAttribute.getZ(i);
+        positionAttribute.setZ(i, z + Math.abs(x) * 0.5);
+    }
+    wingGeo.computeVertexNormals();
+    const wings = new THREE.Mesh(wingGeo, jetMaterial);
+    wings.position.set(0, 0, 2);
+    wings.castShadow = true;
+    aircraft.add(wings);
+
+    // Tail
+    const tailGeo = new THREE.BoxGeometry(0.5, 4, 3);
+    const tailPosAttribute = tailGeo.attributes.position;
+    for ( let i = 0; i < tailPosAttribute.count; i ++ ) {
+        const y = tailPosAttribute.getY(i);
+        const z = tailPosAttribute.getZ(i);
+        tailPosAttribute.setZ(i, z + y * 0.5);
+    }
+    tailGeo.computeVertexNormals();
+    const tail = new THREE.Mesh(tailGeo, jetMaterial);
+    tail.position.set(0, 3, 8);
+    tail.castShadow = true;
+    aircraft.add(tail);
+
+    // Cockpit Canopy
+    const canopyGeo = new THREE.CapsuleGeometry(0.8, 3, 4, 16);
+    canopyGeo.rotateX(Math.PI / 2);
+    const canopyMat = new THREE.MeshPhysicalMaterial({
+        color: 0x000000, metalness: 1.0, roughness: 0.0, transmission: 0.9, thickness: 0.5
+    });
+    const canopy = new THREE.Mesh(canopyGeo, canopyMat);
+    canopy.position.set(0, 1.2, -4);
+    aircraft.add(canopy);
+
+    // Engine Glow
+    const engineGlowGeo = new THREE.CylinderGeometry(1.5, 1.5, 0.5, 16);
+    engineGlowGeo.rotateX(Math.PI / 2);
+    const engineMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+    const engineGlow = new THREE.Mesh(engineGlowGeo, engineMat);
+    engineGlow.position.set(0, 0, 10);
+    aircraft.add(engineGlow);
+    
+    const engineLight = new THREE.PointLight(0x00ffff, 2, 20);
+    engineLight.position.set(0,0,10);
+    aircraft.add(engineLight);
+
+    // --- Procedural Terrain Generation ---
+    const simplex = new SimplexNoise();
+    
+    // We create a pool of terrain chunks to tile endlessly
+    const chunks = new Map();
+    
+    const terrainMaterial = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.8,
+        metalness: 0.1,
+        flatShading: true // Low-poly stylistic choice mixed with high-end lighting
+    });
+
+    const waterMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0x113355,
+        metalness: 0.9,
+        roughness: 0.1,
+        transparent: true,
+        opacity: 0.8,
+        envMapIntensity: 1.0
+    });
+
+    function getNoiseHeight(x, z) {
+        // Multi-layered fractal noise
+        let y = simplex.noise2D(x * 0.0005, z * 0.0005) * 500;
+        y += simplex.noise2D(x * 0.002, z * 0.002) * 150;
+        y += simplex.noise2D(x * 0.01, z * 0.01) * 20;
+        
+        // Flatten valleys (oceans)
+        if (y < 50) y = y * 0.2; 
+        
+        return y;
+    }
+
+    function generateChunk(chunkX, chunkZ) {
+        const geo = new THREE.PlaneGeometry(CONFIG.chunkSize, CONFIG.chunkSize, CONFIG.chunkResolution, CONFIG.chunkResolution);
+        geo.rotateX(-Math.PI / 2);
+        
+        const pos = geo.attributes.position;
+        const colors = [];
+        const color = new THREE.Color();
+
+        for (let i = 0; i < pos.count; i++) {
+            const vx = pos.getX(i) + chunkX * CONFIG.chunkSize;
+            const vz = pos.getZ(i) + chunkZ * CONFIG.chunkSize;
+            
+            const h = getNoiseHeight(vx, vz);
+            pos.setY(i, h);
+
+            // Coloring based on height
+            if (h < 20) color.setHex(0xd2b48c); // Sand
+            else if (h < 200) color.setHex(0x2d4c1e); // Forest/Grass
+            else if (h < 400) color.setHex(0x555555); // Rock
+            else color.setHex(0xffffff); // Snow
+
+            // Add some variation based on steepness (simple approximation)
+            colors.push(color.r, color.g, color.b);
+        }
+
+        geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        geo.computeVertexNormals();
+
+        const mesh = new THREE.Mesh(geo, terrainMaterial);
+        mesh.position.set(chunkX * CONFIG.chunkSize, 0, chunkZ * CONFIG.chunkSize);
+        mesh.receiveShadow = true;
+        
+        // Add water plane to chunk
+        const waterGeo = new THREE.PlaneGeometry(CONFIG.chunkSize, CONFIG.chunkSize);
+        waterGeo.rotateX(-Math.PI/2);
+        const water = new THREE.Mesh(waterGeo, waterMaterial);
+        water.position.y = 15; // Sea level
+        water.receiveShadow = true;
+        mesh.add(water);
+
+        scene.add(mesh);
+        return mesh;
+    }
+
+    function updateTerrain() {
+        const currentChunkX = Math.round(state.position.x / CONFIG.chunkSize);
+        const currentChunkZ = Math.round(state.position.z / CONFIG.chunkSize);
+        
+        const renderDistance = 2; // Radius of chunks to render
+        const activeChunks = new Set();
+
+        for (let x = -renderDistance; x <= renderDistance; x++) {
+            for (let z = -renderDistance; z <= renderDistance; z++) {
+                const cx = currentChunkX + x;
+                const cz = currentChunkZ + z;
+                const key = `${cx},${cz}`;
+                activeChunks.add(key);
+
+                if (!chunks.has(key)) {
+                    chunks.set(key, generateChunk(cx, cz));
+                }
+            }
+        }
+
+        // Cleanup distant chunks
+        for (const [key, mesh] of chunks.entries()) {
+            if (!activeChunks.has(key)) {
+                scene.remove(mesh);
+                mesh.geometry.dispose();
+                // children[0] is water
+                if(mesh.children[0]) mesh.children[0].geometry.dispose(); 
+                chunks.delete(key);
+            }
+        }
+    }
+
+    // --- Audio System (Tone.js) ---
+    let synthEngine, noiseWind;
+    let audioInitialized = false;
+
+    async function initAudio() {
+        if (audioInitialized) return;
+        await Tone.start();
+        
+        // Engine hum
+        synthEngine = new Tone.FMSynth({
+            harmonicity: 1.5,
+            modulationIndex: 2,
+            oscillator: { type: "sawtooth" },
+            modulation: { type: "square" },
+            envelope: { attack: 0.1, decay: 0.1, sustain: 1, release: 1 }
+        }).toDestination();
+        synthEngine.volume.value = -20;
+        synthEngine.triggerAttack("C2");
+
+        // Wind noise
+        noiseWind = new Tone.Noise("brown").toDestination();
+        noiseWind.volume.value = -Infinity; // Start muted
+        noiseWind.start();
+
+        audioInitialized = true;
+    }
+
+    function updateAudio() {
+        if (!audioInitialized) return;
+        
+        // Map throttle to engine pitch and volume
+        const engineFreq = 50 + (state.throttle * 150);
+        synthEngine.frequency.rampTo(engineFreq, 0.1);
+        synthEngine.volume.rampTo(-30 + (state.throttle * 15), 0.1);
+
+        // Map speed to wind noise volume
+        const speedRatio = state.speed / CONFIG.maxSpeed;
+        const windVol = -40 + (speedRatio * 30);
+        noiseWind.volume.rampTo(windVol === -40 ? -Infinity : windVol, 0.1);
+    }
+
+    // --- Input Handling ---
+    
+    // Keyboard
+    window.addEventListener('keydown', (e) => {
+        const key = e.key.toLowerCase();
+        if (state.keys.hasOwnProperty(key)) state.keys[key] = true;
+        if (e.key === 'ArrowUp') state.keys.up = true;
+        if (e.key === 'ArrowDown') state.keys.down = true;
+    });
+    window.addEventListener('keyup', (e) => {
+        const key = e.key.toLowerCase();
+        if (state.keys.hasOwnProperty(key)) state.keys[key] = false;
+        if (e.key === 'ArrowUp') state.keys.up = false;
+        if (e.key === 'ArrowDown') state.keys.down = false;
+    });
+
+    // Mouse Look (Pan camera)
+    let isDragging = false;
+    let previousMousePosition = { x: 0, y: 0 };
+    let cameraPan = { x: 0, y: 0 };
+
+    window.addEventListener('mousedown', () => isDragging = true);
+    window.addEventListener('mouseup', () => {
+        isDragging = false;
+        // Snap back to center
+        cameraPan.x = 0;
+        cameraPan.y = 0;
+    });
+    window.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+            const deltaMove = {
+                x: e.offsetX - previousMousePosition.x,
+                y: e.offsetY - previousMousePosition.y
+            };
+            cameraPan.x -= deltaMove.x * 0.005;
+            cameraPan.y += deltaMove.y * 0.005;
+            
+            // Limit pan
+            cameraPan.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, cameraPan.x));
+            cameraPan.y = Math.max(-0.5, Math.min(1.0, cameraPan.y));
+        }
+        previousMousePosition = { x: e.offsetX, y: e.offsetY };
+    });
+
+    // Touch Controls (PWA/Mobile)
+    const joyZone = document.getElementById('joystick-zone');
+    const joyKnob = document.getElementById('joystick-knob');
+    const throttleZone = document.getElementById('throttle-zone');
+    const throttleKnob = document.getElementById('throttle-knob');
+
+    // Joystick Logic
+    let joyActive = false;
+    let joyCenter = { x: 0, y: 0 };
+
+    function handleJoy(e) {
+        e.preventDefault();
+        if (!joyActive) return;
+        const touch = e.targetTouches[0] || e.changedTouches[0];
+        const rect = joyZone.getBoundingClientRect();
+        
+        let dx = touch.clientX - joyCenter.x;
+        let dy = touch.clientY - joyCenter.y;
+        
+        const maxDist = rect.width / 2;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
+        if (dist > maxDist) {
+            dx = (dx / dist) * maxDist;
+            dy = (dy / dist) * maxDist;
+        }
+
+        joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+        
+        // Map to -1 to 1 for flight input
+        state.input.roll = dx / maxDist;
+        state.input.pitch = dy / maxDist;
+    }
+
+    joyZone.addEventListener('touchstart', (e) => {
+        joyActive = true;
+        const rect = joyZone.getBoundingClientRect();
+        joyCenter = { x: rect.left + rect.width/2, y: rect.top + rect.height/2 };
+        handleJoy(e);
+    });
+    joyZone.addEventListener('touchmove', handleJoy, { passive: false });
+    const joyEnd = (e) => {
+        joyActive = false;
+        joyKnob.style.transform = 'translate(-50%, -50%)';
+        state.input.roll = 0;
+        state.input.pitch = 0;
+    };
+    joyZone.addEventListener('touchend', joyEnd);
+    joyZone.addEventListener('touchcancel', joyEnd);
+
+    // Throttle Logic
+    let throttleActive = false;
+    function handleThrottle(e) {
+        e.preventDefault();
+        if (!throttleActive) return;
+        const touch = e.targetTouches[0] || e.changedTouches[0];
+        const rect = throttleZone.getBoundingClientRect();
+        
+        // Calculate percentage from bottom
+        let y = rect.bottom - touch.clientY;
+        y = Math.max(0, Math.min(rect.height, y));
+        
+        const percent = y / rect.height;
+        throttleKnob.style.bottom = `${percent * 100}%`;
+        state.throttle = percent;
+    }
+
+    throttleZone.addEventListener('touchstart', (e) => { throttleActive = true; handleThrottle(e); });
+    throttleZone.addEventListener('touchmove', handleThrottle, { passive: false });
+    throttleZone.addEventListener('touchend', () => throttleActive = false);
+    throttleZone.addEventListener('touchcancel', () => throttleActive = false);
+
+
+    // --- Flight Physics Engine ---
+    function updatePhysics(dt) {
+        // 1. Process Input
+        
+        // Keyboard overrides touch if active
+        if (state.keys.w) state.input.pitch = -1;
+        else if (state.keys.s) state.input.pitch = 1;
+        else if (!joyActive) state.input.pitch = 0; // Return to center
+
+        if (state.keys.a) state.input.roll = -1;
+        else if (state.keys.d) state.input.roll = 1;
+        else if (!joyActive) state.input.roll = 0; // Return to center
+
+        if (state.keys.up) state.throttle = Math.min(1, state.throttle + dt * 0.5);
+        if (state.keys.down) state.throttle = Math.max(0, state.throttle - dt * 0.5);
+
+        // Update throttle UI for keyboard users
+        if (!throttleActive) throttleKnob.style.bottom = `${state.throttle * 100}%`;
+
+        // 2. Flight Dynamics
+        
+        // Apply rotation
+        const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), state.input.pitch * CONFIG.pitchRate * dt);
+        const rollQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), -state.input.roll * CONFIG.turnRate * dt);
+        
+        state.quaternion.multiply(pitchQuat).multiply(rollQuat);
+        state.quaternion.normalize();
+        aircraft.quaternion.copy(state.quaternion);
+
+        // Calculate Forward Vector
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(state.quaternion);
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(state.quaternion);
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(state.quaternion);
+
+        // Thrust
+        const thrust = state.throttle * CONFIG.acceleration;
+        
+        // Drag (increases with speed squared)
+        const drag = state.speed * state.speed * CONFIG.dragFactor;
+
+        // Gravity
+        const weight = new THREE.Vector3(0, -CONFIG.gravity, 0);
+
+        // Lift (perpendicular to forward, primarily in local 'up' direction)
+        // More speed = more lift. Pitching up increases angle of attack (simplified).
+        // Actual lift vector redirects based on bank angle (roll).
+        const liftMagnitude = state.speed * state.speed * CONFIG.liftFactor;
+        const lift = new THREE.Vector3().copy(up).multiplyScalar(liftMagnitude);
+
+        // Banking mechanics (turning)
+        // If banked, lift pulls the plane sideways
+        
+        // Calculate Acceleration
+        const thrustAccel = new THREE.Vector3().copy(forward).multiplyScalar(thrust);
+        const dragAccel = new THREE.Vector3().copy(state.velocity).normalize().multiplyScalar(-drag);
+        
+        // If speed is extremely low, drag vector is wonky, so avoid NaN
+        if (state.speed < 0.1) dragAccel.set(0,0,0);
+
+        let totalAccel = new THREE.Vector3()
+            .add(thrustAccel)
+            .add(dragAccel)
+            .add(weight)
+            .add(lift);
+
+        // Update Velocity
+        state.velocity.add(totalAccel.multiplyScalar(dt));
+        
+        // Simplified aerodynamic alignment: Plane tends to align velocity with forward vector
+        // (Weather-vaning effect)
+        if (state.speed > 10) {
+            const targetVel = new THREE.Vector3().copy(forward).multiplyScalar(state.speed);
+            state.velocity.lerp(targetVel, dt * 2.0); // Align velocity to nose
+        }
+
+        // Apply Velocity to Position
+        state.position.add(new THREE.Vector3().copy(state.velocity).multiplyScalar(dt));
+        aircraft.position.copy(state.position);
+
+        // Update scalar speed
+        state.speed = state.velocity.length();
+        state.altitude = state.position.y;
+
+        // Ground collision
+        const groundHeight = getNoiseHeight(state.position.x, state.position.z);
+        const waterHeight = 15;
+        const surfaceHeight = Math.max(groundHeight, waterHeight);
+        
+        if (state.position.y < surfaceHeight + 2) {
+            // Crash / Bounce
+            state.position.y = surfaceHeight + 2;
+            state.velocity.y = Math.max(0, state.velocity.y);
+            state.speed *= 0.95; // Friction
+            
+            // Level out pitch/roll if hitting ground
+            const levelQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), 0);
+            state.quaternion.slerp(levelQuat, dt * 5);
+        }
+
+        // Engine Visuals
+        engineMat.color.setHSL(0.5, 1, 0.2 + (state.throttle * 0.8));
+        engineLight.intensity = 1 + (state.throttle * 3);
+    }
+
+    // --- UI Updates ---
+    const uiSpeed = document.getElementById('ui-speed');
+    const uiAlt = document.getElementById('ui-alt');
+    const uiFps = document.getElementById('ui-fps');
+    const uiEngine = document.getElementById('ui-engine');
+    const pitchLadder = document.getElementById('pitch-ladder');
+
+    function updateUI() {
+        // Text displays
+        uiSpeed.innerHTML = `${Math.round(state.speed * 2)} <span class="text-sm text-slate-400 font-normal">KTS</span>`;
+        uiAlt.innerHTML = `${Math.round(state.altitude * 3.28084)} <span class="text-sm text-slate-400 font-normal">FT</span>`;
+        
+        if (state.throttle === 0) uiEngine.innerText = "ENG: IDLE";
+        else if (state.throttle > 0.9) uiEngine.innerText = "ENG: MAX";
+        else uiEngine.innerText = `ENG: ${Math.round(state.throttle * 100)}%`;
+
+        // Artificial Horizon / Pitch Ladder
+        // Extract pitch and roll from quaternion using Euler
+        const euler = new THREE.Euler().setFromQuaternion(state.quaternion, 'YXZ');
+        const pitchDeg = THREE.MathUtils.radToDeg(euler.x);
+        const rollDeg = THREE.MathUtils.radToDeg(euler.z);
+
+        // Translate ladder for pitch, rotate for roll
+        const pitchOffset = pitchDeg * 2; // pixel multiplier
+        pitchLadder.setAttribute('transform', `translate(0, ${pitchOffset}) rotate(${-rollDeg}, 100, ${100 - pitchOffset})`);
+
+        // FPS Calc
+        state.frameCount++;
+        const now = performance.now();
+        if (now - state.fpsTime >= 1000) {
+            uiFps.innerText = `${state.frameCount} FPS`;
+            state.frameCount = 0;
+            state.fpsTime = now;
+        }
+    }
+
+    // --- Main Loop ---
+    function animate() {
+        if (!state.isPlaying) return;
+        requestAnimationFrame(animate);
+
+        const now = performance.now();
+        let dt = (now - state.lastTime) / 1000;
+        state.lastTime = now;
+        
+        // Cap dt to avoid physics explosions on lag spikes
+        if (dt > 0.1) dt = 0.1;
+
+        updatePhysics(dt);
+        updateTerrain();
+        updateAudio();
+        updateUI();
+
+        // Camera Follow Logic (Smooth chase)
+        // Position camera behind aircraft
+        const relativeOffset = cameraTargetOffset.clone().applyQuaternion(state.quaternion);
+        const desiredCameraPos = state.position.clone().add(relativeOffset);
+        
+        // Add manual pan
+        const panOffset = new THREE.Vector3(Math.sin(cameraPan.x)*20, cameraPan.y*20, Math.cos(cameraPan.x)*20);
+        desiredCameraPos.add(panOffset);
+
+        cameraGroup.position.lerp(desiredCameraPos, dt * 5.0);
+
+        // Look at point ahead of aircraft
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(state.quaternion);
+        const lookTarget = state.position.clone().add(forward.multiplyScalar(100));
+        
+        lookAtTarget.lerp(lookTarget, dt * 10.0);
+        cameraGroup.lookAt(lookAtTarget);
+
+        renderer.render(scene, camera);
+    }
+
+    // --- Initialization & Setup ---
+    document.getElementById('start-btn').addEventListener('click', async () => {
+        document.getElementById('start-screen').style.display = 'none';
+        
+        // Init state
+        state.position.set(0, 800, 0);
+        state.velocity.set(0, 0, -150); // Start with forward speed
+        state.throttle = 0.5;
+        throttleKnob.style.bottom = '50%';
+        
+        // Set initial orientation
+        state.quaternion.setFromAxisAngle(new THREE.Vector3(0,1,0), Math.PI); // facing -Z
+        aircraft.quaternion.copy(state.quaternion);
+
+        // Generate initial terrain to avoid pop-in
+        updateTerrain();
+        
+        // Start engine
+        await initAudio();
+        
+        state.isPlaying = true;
+        state.lastTime = performance.now();
+        animate();
+    });
+
+    // Handle Resize
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Initial render to draw the background before start
+    renderer.render(scene, camera);
+
+</script>
+</body>
+</html>
